@@ -22,11 +22,20 @@ def main():
     print()
     print("=" * 50)
     print("[2] 同步全市场字典")
-    count = collector.sync_reference()
-    print(f"    写入 {count} 条，库中现有 {repo.reference_count()} 条")
+    stats = collector.sync_reference()
+    total = repo.reference_count()
+    non_stock = repo.reference_non_stock_count()
+    print(
+        f"    提交 {stats['submitted']} 条，"
+        f"去重 {stats['distinct']} 条，"
+        f"库中 {total} 条，"
+        f"非股票 {non_stock} 条"
+    )
 
-    assert count > 0, "字典同步失败"
-    assert repo.reference_count() == count, "字典条数不一致"
+    assert stats["submitted"] > 0, "字典同步失败，未取到数据"
+    assert stats["duplicated"] == 0, f"批次内出现重复代码 {stats['duplicated']} 个"
+    assert total == stats["distinct"], "库内条数与本批去重条数不一致"
+    assert non_stock == 0, f"字典中残留 {non_stock} 条非股票"
 
     print()
     print("=" * 50)
@@ -78,6 +87,38 @@ def main():
     repo.set_active("600519", True)
     repo.delete_group(group_a["id"])
     repo.delete_group(group_b["id"])
+
+    print()
+    print("=" * 50)
+    print("[7] 批量导入")
+    import_codes = ["600519", "000001", "sz.000002", "600519", "abc"]
+    valid_codes = {"600519", "000001", "000002"}
+
+    before = {s["code"] for s in repo.list_stocks(only_active=False)}
+
+    result = repo.import_stocks(import_codes)
+
+    after = {s["code"] for s in repo.list_stocks(only_active=False)}
+
+    # 与数据库当前状态无关：库里没有的才算新增
+    expected_new = valid_codes - before
+
+    print(
+        f"    提交 5 只，新增 {result['imported']} 只，"
+        f"已存在 {result['updated']} 只，"
+        f"无效 {len(result['invalid'])} 个"
+    )
+    print(f"    无效代码: {result['invalid']}")
+    print(f"    导入前 {len(before)} 只 → 导入后 {len(after)} 只")
+
+    assert result["imported"] == len(expected_new), "批量导入新增数不对"
+    assert result["updated"] == len(valid_codes) - len(expected_new), "已存在数不对"
+    assert result["invalid"] == ["abc"], "非法代码未被拦截"
+    assert after - before == expected_new, "新增股票没有真正落库"
+    assert len(after) == len(set(after)), "批量导入产生重复股票"
+    assert len(after) == len(before) + len(expected_new), "自选池数量不对"
+
+    print(f"    导入后自选池 {len(after)} 只，代码无重复")
 
     print()
     print("阶段 2 数据层验收通过")

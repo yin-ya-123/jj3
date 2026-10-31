@@ -29,16 +29,8 @@ class BaostockProvider:
 
         code = normalize_stock_code(symbol)
 
-        if code.startswith("6"):
-            return f"sh.{code}"
-
-        if code.startswith(("0", "3")):
-            return f"sz.{code}"
-
-        if code.startswith(("4", "8")):
-            return f"bj.{code}"
-
-        raise ValueError(f"暂不支持的股票代码: {symbol}")
+        # 市场规则只在 data/utils.market_of 里维护一份
+        return f"{market_of(code).lower()}.{code}"
 
     # =========================
     # 历史行情
@@ -212,23 +204,23 @@ class BaostockProvider:
         finally:
             bs.logout()
 
-    def list_all_stocks(self, day: str) -> pd.DataFrame:
-        """获取指定交易日的全市场股票列表"""
+    def list_all_stocks(self) -> pd.DataFrame:
+        """获取全市场股票字典
 
+        数据源：query_stock_basic()（不带参数，返回全部证券）
+        只保留 type=1（股票），上市与退市都保留
+        market 直接取原始前缀 sh./sz./bj.，不再按代码首位猜测
+        """
         login_result = bs.login()
 
         if login_result.error_code != "0":
-            raise RuntimeError(
-                f"Baostock 登录失败: {login_result.error_msg}"
-            )
+            raise RuntimeError(f"Baostock 登录失败: {login_result.error_msg}")
 
         try:
-            result = bs.query_all_stock(day=day)
+            result = bs.query_stock_basic()
 
             if result.error_code != "0":
-                raise RuntimeError(
-                    f"股票列表查询失败: {result.error_msg}"
-                )
+                raise RuntimeError(f"股票列表查询失败: {result.error_msg}")
 
             rows = []
 
@@ -240,15 +232,16 @@ class BaostockProvider:
             if df.empty:
                 return df
 
-            df = df.rename(
-                columns={"code_name": "name", "tradeStatus": "trade_status"}
-            )
+            # type: # 1=股票 2=指数 3=其它 4=可转债 5=ETF 6=LOF 7=基金
+            df = df[df["type"] == "1"].copy()
+            full_code = df["code"].astype(str)
 
-            df["code"] = df["code"].astype(str).str.split(".").str[-1]
-            df["market"] = df["code"].map(market_of)
+            df["market"] = full_code.str.split(".").str[0].str.upper()
+            df["code"] = full_code.str.split(".").str[-1]
+            df["name"] = df["code_name"]
+            df["trade_status"] = df["status"]
 
             return df[["code", "name", "market", "trade_status"]]
-
         finally:
             bs.logout()
 
@@ -259,17 +252,19 @@ class BaostockProvider:
         records = []
 
         for _, row in df.iterrows():
-            code = str(row["code"]).split(".")[-1]
+            full_code = str(row["code"])
 
             records.append({
-                "code": code,
+                "code": full_code.split(".")[-1],
                 "name": row.get("code_name"),
-                "market": market_of(code),
+                # 市场取数据源原始前缀，比按代码首位猜更准
+                "market": full_code.split(".")[0].upper(),
                 "ipo_date": row.get("ipoDate") or None,
                 "out_date": row.get("outDate") or None,
                 "type": row.get("type"),
                 "status": row.get("status"),
-                "trade_status": row.get("trade_status"),
+                # Baostock 没有 trade_status 字段，上市/退市状态就是 status
+                "trade_status": row.get("status"),
             })
 
         return records

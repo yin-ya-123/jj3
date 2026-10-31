@@ -15,20 +15,15 @@ class StockCollector:
     def __init__(self):
         self.provider = BaostockProvider()
 
-    def sync_reference(self, day: str | None = None) -> int:
-        """同步全市场股票字典到本地库，返回写入条数"""
+    def sync_reference(self) -> dict:
+        """同步全市场股票字典到本地库，返回写入统计"""
 
-        days = [day] if day else self._candidate_days()
+        df = self.provider.list_all_stocks()
 
-        for one_day in days:
-            df = self.provider.list_all_stocks(one_day)
+        if df.empty:
+            return {"submitted": 0, "distinct": 0, "duplicated": 0}
 
-            if df.empty:
-                continue
-
-            return upsert_reference(df.to_dict("records"))
-
-        return 0
+        return upsert_reference(df.to_dict("records"))
 
     def fetch_basic(self, code: str) -> dict | None:
         """联网查询单只股票基础信息"""

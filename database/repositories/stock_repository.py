@@ -20,9 +20,9 @@ from data.utils import market_of, normalize_code
 # =========================
 
 def list_stocks(
-    keyword: str | None = None,
-    group_id: int | None = None,
-    only_active: bool = True,
+        keyword: str | None = None,
+        group_id: int | None = None,
+        only_active: bool = True,
 ) -> list[dict]:
     """列出股票，可按关键字和分组过滤"""
 
@@ -92,10 +92,10 @@ def get_stock(code: str) -> dict | None:
 
 
 def add_stock(
-    code: str,
-    name: str | None = None,
-    industry: str | None = None,
-    ipo_date=None,
+        code: str,
+        name: str | None = None,
+        industry: str | None = None,
+        ipo_date=None,
 ) -> dict:
     """新增或重新启用股票（纯存储，不联网）"""
 
@@ -121,6 +121,77 @@ def add_stock(
             stock.ipo_date = _parse_date(ipo_date)
 
     return get_stock(code)
+
+
+def import_stocks(codes: list[str]) -> dict:
+    """批量导入股票到自选池，名称和市场从全市场字典自动补全
+
+    返回：imported=新增只数, updated=已存在只数, invalid=无效代码列表
+    """
+    cleaned = []
+    invalid = []
+
+    for raw in codes:
+        text = str(raw).strip()
+
+        if not text:
+            invalid.append(text)
+            continue
+
+        try:
+            cleaned.append(normalize_code(text))
+        except ValueError:
+            invalid.append(text)
+
+    unique = list(dict.fromkeys(cleaned))
+
+    if not unique:
+        return {"imported": 0, "updated": 0, "invalid": invalid}
+
+    with SessionLocal.begin() as session:
+        reference = {
+            code: {"name": name, "market": market}
+            for code, name, market in session.execute(
+                select(
+                    StockReference.code,
+                    StockReference.name,
+                    StockReference.market,
+                ).where(StockReference.code.in_(unique))
+            ).all()
+        }
+
+        imported = 0
+        updated = 0
+
+        for code in unique:
+            info = reference.get(code)
+
+            # 字典里查不到 = 不是有效股票代码
+            if not info:
+                invalid.append(code)
+                continue
+
+            stock = session.get(Stock, code)
+
+            if stock is None:
+                session.add(
+                    Stock(
+                        code=code,
+                        name=info.get("name"),
+                        market=info.get("market"),
+                    )
+                )
+                imported += 1
+            else:
+                stock.is_active = 1
+                stock.updated_at = datetime.now()
+
+                if not stock.name and info.get("name"):
+                    stock.name = info["name"]
+
+                updated += 1
+
+    return {"imported": imported, "updated": updated, "invalid": invalid}
 
 
 def update_stock(code: str, **fields) -> dict:
@@ -228,9 +299,9 @@ def create_group(name: str, description: str | None = None) -> dict:
 
 
 def rename_group(
-    group_id: int,
-    name: str,
-    description: str | None = None,
+        group_id: int,
+        name: str,
+        description: str | None = None,
 ) -> dict:
     """重命名分组"""
 
@@ -417,30 +488,36 @@ def search_reference(keyword: str, limit: int = 50) -> list[dict]:
         ]
 
 
-def upsert_reference(rows: list[dict]) -> int:
-    """批量写入或更新全市场字典"""
+def upsert_reference(rows: list[dict]) -> dict:
+    """批量写入或更新全市场字典，返回写入统计
 
-    records = []
+    返回：submitted=处理条数, distinct=去重后条数, duplicated=批内重复条数
+    """
+    prepared = []
 
     for row in rows:
         if not row.get("code"):
             continue
 
         code = normalize_code(row["code"])
+        prepared.append(
+            {
+                "code": code,
+                "name": row.get("name") or None,
+                "market": row.get("market") or market_of(code),
+                "trade_status": row.get("trade_status") or None,
+            }
+        )
 
-        records.append({
-            "code": code,
-            "name": row.get("name") or None,
-            "market": row.get("market") or market_of(code),
-            "trade_status": row.get("trade_status") or None,
-        })
+    # 批次内同码只保留一条，避免主键折叠
+    unique = {item["code"]: item for item in prepared}
+    records = list(unique.values())
 
     if not records:
-        return 0
+        return {"submitted": 0, "distinct": 0, "duplicated": 0}
 
     with SessionLocal.begin() as session:
         statement = sqlite_insert(StockReference).values(records)
-
         statement = statement.on_conflict_do_update(
             index_elements=["code"],
             set_={
@@ -450,10 +527,13 @@ def upsert_reference(rows: list[dict]) -> int:
                 "updated_at": func.current_timestamp(),
             },
         )
-
         session.execute(statement)
 
-    return len(records)
+    return {
+        "submitted": len(prepared),
+        "distinct": len(records),
+        "duplicated": len(prepared) - len(records),
+    }
 
 
 def reference_count() -> int:
@@ -463,6 +543,25 @@ def reference_count() -> int:
         return session.scalar(
             select(func.count(StockReference.code))
         ) or 0
+
+
+def reference_non_stock_count() -> int:
+    """字典里名称疑似非股票的条数（指数/ETF/基金/债），用于数据质量校验"""
+    with SessionLocal() as session:
+        return (
+                session.scalar(
+                    select(func.count(StockReference.code)).where(
+                        or_(
+                            StockReference.name.like("%指数%"),
+                            StockReference.name.like("%ETF%"),
+                            StockReference.name.like("%LOF%"),
+                            StockReference.name.like("%基金%"),
+                            StockReference.name.like("%债%"),
+                        )
+                    )
+                )
+                or 0
+        )
 
 
 # =========================
