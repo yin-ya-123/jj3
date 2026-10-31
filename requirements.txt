@@ -1,0 +1,16 @@
+# ============================================================
+# Python environment: Python 3.11 / Windows x64
+# StockPilot 项目实际使用的依赖
+# ============================================================
+
+# Web 框架
+streamlit
+
+# 数据处理
+pandas
+
+# 数据库 ORM
+SQLAlchemy
+
+# A股数据源
+baostock
