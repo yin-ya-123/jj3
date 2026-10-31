@@ -15,6 +15,7 @@ from data.indicators import add_all_indicators
 from database.repositories.adjust_factor_repository import get_adjust_factor_frame
 from database.repositories.daily_bar_repository import get_daily_bars
 from database.repositories.stock_repository import list_stocks
+from ui.glossary import render_indicator_glossary
 
 # A 股惯例：红涨绿跌
 COLOR_UP = "#e63946"
@@ -292,3 +293,6 @@ def render_market_center() -> None:
             "rsi_14": st.column_config.NumberColumn("RSI14", format="%.2f"),
         },
     )
+
+    st.divider()
+    render_indicator_glossary()

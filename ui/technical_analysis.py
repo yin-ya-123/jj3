@@ -22,6 +22,7 @@ from database.repositories.daily_bar_repository import get_daily_bars
 from database.repositories.stock_repository import list_stocks
 
 from data.adjustment import apply_adjust
+from ui.glossary import render_indicator_glossary
 
 REPORT_LOOKBACK = 120
 EXTRA_BARS = 80
@@ -322,3 +323,6 @@ def render_technical_analysis() -> None:
 
     with st.expander("预览报告全文"):
         st.markdown(report)
+
+    st.divider()
+    render_indicator_glossary()
