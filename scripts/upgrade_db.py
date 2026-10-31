@@ -8,7 +8,8 @@
     2. stocks 表补 4 个字段（阶段 2，已存在自动跳过）
     3. data_sync_logs 表补 2 个字段（阶段 3：period / adjustflag）
     4. daily_bars 表补 trade_status 字段（阶段 3.4：tradestatus 落库）
-    5. 建缺失的表（bars / adjust_factors / stock_groups / stock_reference ...）
+    5. 建缺失的表（bars / adjust_factors / stock_groups / stock_reference /
+       financial_reports ...）
 
 脚本可重复执行：已有字段、已有表都会跳过。
 """
@@ -131,10 +132,12 @@ def main() -> None:
         raw = conn.execute(
             text("SELECT COUNT(*) FROM daily_bars WHERE adjustflag = '3'")
         ).scalar()
+        has_financial_reports = "financial_reports" in tables
 
     print(
         f"校验：stocks={stocks}（有效 {active}），"
-        f"daily_bars={bars}（不复权 {raw}），同步日志={logs}"
+        f"daily_bars={bars}（不复权 {raw}），同步日志={logs}，"
+        f"financial_reports={'已建' if has_financial_reports else '未建'}"
     )
     print("升级完成")
 

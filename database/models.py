@@ -417,3 +417,133 @@ class SchemaComment(Base):
         server_default=func.current_timestamp(),
         comment="更新时间",
     )
+
+
+# =========================# 阶段 5.1 新增
+# =========================
+
+class FinancialReport(Base):
+    """财报宽表（报告期 × 核心财务指标）
+
+    每只股票每个报告期一行，双日期字段：
+        report_date   报告期（如 2026-06-30，STAT_DATE）
+        announce_date 披露日期（NOTICE_DATE，财报实际公开日）
+
+    历史回测只用 announce_date <= 回测日 的数据，避免未来函数。
+    数据源：akshare 东方财富三表 + 财务摘要（阶段 5.1 选型）。
+    数值单位随数据源原值（元），比率类为百分比（%），增速类为百分比（%）。
+    """
+
+    __tablename__ = "financial_reports"
+
+    __table_args__ = (
+        UniqueConstraint(
+            "stock_code",
+            "report_date",
+            name="uq_financial_report",
+        ),
+        Index(
+            "ix_financial_report_code_date",
+            "stock_code",
+            "report_date",
+        ),
+        {"comment": "财报宽表（报告期 × 核心财务指标，双日期字段）"},
+    )
+
+    id: Mapped[int] = mapped_column(
+        Integer, primary_key=True, autoincrement=True, comment="自增主键"
+    )
+
+    stock_code: Mapped[str] = mapped_column(
+        String(6), index=True, comment="股票代码（6 位）"
+    )
+    report_date: Mapped[date] = mapped_column(
+        Date, nullable=False, comment="报告期（如 2026-06-30）"
+    )
+    announce_date: Mapped[date | None] = mapped_column(
+        Date, nullable=True, comment="披露日期（财报实际公开日，回测防未来函数）"
+    )
+
+    # ---- 盈利能力（财务摘要） ----
+    roe: Mapped[float | None] = mapped_column(Float, comment="净资产收益率 ROE（%）")
+    roe_diluted: Mapped[float | None] = mapped_column(
+        Float, comment="加权净资产收益率（%）"
+    )
+    net_profit_ratio: Mapped[float | None] = mapped_column(
+        Float, comment="销售净利率（%）"
+    )
+    gross_profit_ratio: Mapped[float | None] = mapped_column(
+        Float, comment="销售毛利率（%）"
+    )
+    eps: Mapped[float | None] = mapped_column(Float, comment="每股收益（元）")
+    bps: Mapped[float | None] = mapped_column(Float, comment="每股净资产（元）")
+
+    # ---- 资产负债（资产负债表） ----
+    total_assets: Mapped[float | None] = mapped_column(Float, comment="资产总计（元）")
+    total_liabilities: Mapped[float | None] = mapped_column(
+        Float, comment="负债合计（元）"
+    )
+    total_equity: Mapped[float | None] = mapped_column(
+        Float, comment="股东权益合计（元）"
+    )
+    parent_equity: Mapped[float | None] = mapped_column(
+        Float, comment="归母股东权益（元）"
+    )
+    monetary_funds: Mapped[float | None] = mapped_column(Float, comment="货币资金（元）")
+    accounts_receivable: Mapped[float | None] = mapped_column(
+        Float, comment="应收账款（元）"
+    )
+    inventory: Mapped[float | None] = mapped_column(Float, comment="存货（元）")
+    fixed_asset: Mapped[float | None] = mapped_column(Float, comment="固定资产（元）")
+    goodwill: Mapped[float | None] = mapped_column(Float, comment="商誉（元）")
+
+    # ---- 利润（利润表） ----
+    operate_income: Mapped[float | None] = mapped_column(
+        Float, comment="营业总收入（元）"
+    )
+    operate_cost: Mapped[float | None] = mapped_column(Float, comment="营业总成本（元）")
+    operate_profit: Mapped[float | None] = mapped_column(Float, comment="营业利润（元）")
+    total_profit: Mapped[float | None] = mapped_column(Float, comment="利润总额（元）")
+    net_profit: Mapped[float | None] = mapped_column(Float, comment="净利润（元）")
+    parent_net_profit: Mapped[float | None] = mapped_column(
+        Float, comment="归母净利润（元）"
+    )
+    deduct_parent_net_profit: Mapped[float | None] = mapped_column(
+        Float, comment="扣非归母净利润（元）"
+    )
+    sell_expense: Mapped[float | None] = mapped_column(Float, comment="销售费用（元）")
+    manage_expense: Mapped[float | None] = mapped_column(Float, comment="管理费用（元）")
+    finance_expense: Mapped[float | None] = mapped_column(Float, comment="财务费用（元）")
+    research_expense: Mapped[float | None] = mapped_column(Float, comment="研发费用（元）")
+    operate_income_yoy: Mapped[float | None] = mapped_column(
+        Float, comment="营业总收入同比增长（%）"
+    )
+    net_profit_yoy: Mapped[float | None] = mapped_column(
+        Float, comment="净利润同比增长（%）"
+    )
+    parent_net_profit_yoy: Mapped[float | None] = mapped_column(
+        Float, comment="归母净利润同比增长（%）"
+    )
+    deduct_parent_net_profit_yoy: Mapped[float | None] = mapped_column(
+        Float, comment="扣非归母净利润同比增长（%）"
+    )
+
+    # ---- 现金流（现金流量表） ----
+    netcash_operate: Mapped[float | None] = mapped_column(
+        Float, comment="经营活动现金流量净额（元）"
+    )
+    netcash_invest: Mapped[float | None] = mapped_column(
+        Float, comment="投资活动现金流量净额（元）"
+    )
+    netcash_finance: Mapped[float | None] = mapped_column(
+        Float, comment="筹资活动现金流量净额（元）"
+    )
+    netcash_total: Mapped[float | None] = mapped_column(
+        Float, comment="现金及现金等价物净增加额（元）"
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        server_default=func.current_timestamp(),
+        comment="创建时间",
+    )
