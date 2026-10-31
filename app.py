@@ -4,6 +4,7 @@ import streamlit as st
 
 from ui.dashboard import render_dashboard
 from ui.data_sync import render_data_sync
+from ui.fundamental_analysis import render_fundamental_analysis
 from ui.market_center import render_market_center
 from ui.stock_management import render_stock_management
 from ui.technical_analysis import render_technical_analysis
@@ -36,6 +37,7 @@ page = st.sidebar.radio(
         "📋 股票管理",
         "📊 行情中心",
         "📊 技术分析",
+        "📊 基本面分析",
         "🔄 数据同步",
         "🔮 明日预测",
         "⚡ 盘中监控",
@@ -68,6 +70,9 @@ elif page == "📊 行情中心":
 
 elif page == "📊 技术分析":
     render_technical_analysis()
+
+elif page == "📊 基本面分析":
+    render_fundamental_analysis()
 
 elif page == "🔄 数据同步":
     render_data_sync()
