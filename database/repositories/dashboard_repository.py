@@ -19,9 +19,10 @@ def get_dashboard_data() -> dict:
             select(func.count(DailyBar.id))
         ) or 0
 
-        adjusted_bars = session.scalar(
+        # 项目口径：库存存不复权原始价（adjustflag=3），复权在计算层做
+        raw_bars = session.scalar(
             select(func.count(DailyBar.id))
-            .where(DailyBar.adjustflag == "2")
+            .where(DailyBar.adjustflag == "3")
         ) or 0
 
         latest_trade_date = session.scalar(
@@ -58,6 +59,8 @@ def get_dashboard_data() -> dict:
         sync_data = [
             {
                 "股票代码": log.stock_code,
+                "周期": log.period or "d",
+                "复权口径": log.adjustflag or "3",
                 "开始日期": log.start_date,
                 "结束日期": log.end_date,
                 "记录数量": log.record_count,
@@ -82,7 +85,7 @@ def get_dashboard_data() -> dict:
     return {
         "stock_count": stock_count,
         "total_bars": total_bars,
-        "adjusted_bars": adjusted_bars,
+        "raw_bars": raw_bars,
         "latest_trade_date": latest_trade_date,
         "stocks": stock_data,
         "sync_logs": sync_data,

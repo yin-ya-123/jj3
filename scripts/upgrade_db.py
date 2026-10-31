@@ -1,30 +1,46 @@
-"""数据库结构升级：阶段 2 股票基础管理
+"""数据库结构升级：阶段 2 股票基础管理 + 阶段 3 行情与数据中心
 
 用法（项目根目录执行）：
-    uv run --no-sync python scripts/upgrade_db.py
+    .venv\\Scripts\\python.exe scripts\\upgrade_db.py
 
-做三件事：
+做四件事：
     1. 备份 database/stockpilot.db 到 database/backups/
-    2. stocks 表补 4 个字段（已存在自动跳过，可重复执行）
-    3. 建 3 张新表：stock_groups / stock_group_members / stock_reference
+    2. stocks 表补 4 个字段（阶段 2，已存在自动跳过）
+    3. data_sync_logs 表补 2 个字段（阶段 3：period / adjustflag）
+    4. 建缺失的表（bars / adjust_factors / stock_groups / stock_reference ...）
+
+脚本可重复执行：已有字段、已有表都会跳过。
 """
 
 import shutil
+import sys
 from datetime import datetime
 from pathlib import Path
 
 from sqlalchemy import inspect, text
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.stdout.reconfigure(encoding="utf-8")
+
 from database.db import DATABASE_PATH, engine
 from database.models import Base
 
 
-# 阶段 2 需要给 stocks 表补的字段
-NEW_COLUMNS = [
+# stocks 表补的字段（阶段 2）
+STOCKS_COLUMNS = [
     ("is_active", "INTEGER NOT NULL DEFAULT 1"),
     ("industry", "VARCHAR(50)"),
     ("ipo_date", "DATE"),
     ("updated_at", "DATETIME"),
+]
+
+# data_sync_logs 表补的字段（阶段 3）
+# adjustflag 的旧行默认值给 '2'：迁移前库里只有前复权口径的数据
+# （daily_bars 594 行全是 adjustflag='2'），老日志标成 '3' 等于伪造历史。
+# 新写入的日志由 ORM 显式赋值，不吃这个默认值。
+SYNC_LOG_COLUMNS = [
+    ("period", "VARCHAR(5) NOT NULL DEFAULT 'd'"),
+    ("adjustflag", "VARCHAR(1) NOT NULL DEFAULT '2'"),
 ]
 
 
@@ -42,22 +58,27 @@ def backup_db() -> Path:
     return target
 
 
-def add_missing_columns() -> list:
-    """给 stocks 表补字段，已存在的字段自动跳过"""
+def add_missing_columns(table: str, columns: list) -> list:
+    """给表补字段，已存在的字段自动跳过"""
+
+    inspector = inspect(engine)
+
+    if table not in inspector.get_table_names():
+        return []
 
     existing = {
         column["name"]
-        for column in inspect(engine).get_columns("stocks")
+        for column in inspector.get_columns(table)
     }
 
     added = []
 
     with engine.begin() as conn:
-        for name, ddl in NEW_COLUMNS:
+        for name, ddl in columns:
             if name in existing:
                 continue
 
-            conn.execute(text(f"ALTER TABLE stocks ADD COLUMN {name} {ddl}"))
+            conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {ddl}"))
             added.append(name)
 
     return added
@@ -67,31 +88,42 @@ def main() -> None:
     print(f"数据库文件：{DATABASE_PATH}")
 
     if not DATABASE_PATH.exists():
-        print("数据库文件不存在，请先执行 sync_stocks.py 生成数据")
+        print("数据库文件不存在，请先执行采集脚本生成数据")
         return
 
-    #1. 备份
+    # 1. 备份
     backup = backup_db()
-    print(f"[1/3] 备份完成：{backup}")
+    print(f"[1/4] 备份完成：{backup}")
 
-    # 2. 补字段
-    added = add_missing_columns()
-    print(f"[2/3] stocks 新增字段：{added if added else '无（已是最新）'}")
+    # 2. stocks 补字段
+    added = add_missing_columns("stocks", STOCKS_COLUMNS)
+    print(f"[2/4] stocks 新增字段：{added if added else '无（已是最新）'}")
 
-    # 3. 建新表（只建缺失的表，不动已有的表）
+    # 3. 同步日志补字段
+    added = add_missing_columns("data_sync_logs", SYNC_LOG_COLUMNS)
+    print(f"[3/4] data_sync_logs 新增字段：{added if added else '无（已是最新）'}")
+
+    # 4. 建缺失的表（只建缺失的，不动已有的表）
     Base.metadata.create_all(bind=engine)
     tables = inspect(engine).get_table_names()
-    print(f"[3/3] 当前数据表：{tables}")
+    print(f"[4/4] 当前数据表：{tables}")
 
     # 校验
     with engine.connect() as conn:
         stocks = conn.execute(text("SELECT COUNT(*) FROM stocks")).scalar()
         bars = conn.execute(text("SELECT COUNT(*) FROM daily_bars")).scalar()
+        logs = conn.execute(text("SELECT COUNT(*) FROM data_sync_logs")).scalar()
         active = conn.execute(
             text("SELECT COUNT(*) FROM stocks WHERE is_active = 1")
         ).scalar()
+        raw = conn.execute(
+            text("SELECT COUNT(*) FROM daily_bars WHERE adjustflag = '3'")
+        ).scalar()
 
-    print(f"校验：stocks={stocks}（有效 {active}），daily_bars={bars}")
+    print(
+        f"校验：stocks={stocks}（有效 {active}），"
+        f"daily_bars={bars}（不复权 {raw}），同步日志={logs}"
+    )
     print("升级完成")
 
 

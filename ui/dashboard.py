@@ -31,8 +31,8 @@ def render_dashboard():
 
         with col3:
             st.metric(
-                "前复权日线记录",
-                f'{data["adjusted_bars"]:,}',
+                "不复权日线记录",
+                f'{data["raw_bars"]:,}',
             )
 
         with col4:
@@ -48,7 +48,7 @@ def render_dashboard():
         # 系统状态
         st.subheader("🖥️ 系统状态")
 
-        status_col1, status_col2, status_col3 = st.columns(3)
+        status_col1, status_col2, status_col3, status_col4 = st.columns(4)
 
         with status_col1:
             st.info("行情数据源：Baostock")
@@ -57,6 +57,9 @@ def render_dashboard():
             st.info("数据库：SQLite")
 
         with status_col3:
+            st.info("行情口径：库存不复权原始价")
+
+        with status_col4:
             st.info("自动交易：已关闭")
 
         st.divider()
