@@ -6,6 +6,34 @@ from database.db import SessionLocal
 from database.models import DailyBar, DataSyncLog, Stock
 
 
+def get_sync_logs(limit: int = 50) -> list[dict]:
+    """最近同步日志（阶段 3.5 界面共用）"""
+
+    with SessionLocal() as session:
+        logs = list(
+            session.scalars(
+                select(DataSyncLog)
+                .order_by(desc(DataSyncLog.created_at))
+                .limit(limit)
+            ).all()
+        )
+
+    return [
+        {
+            "股票代码": log.stock_code,
+            "周期": log.period or "d",
+            "复权口径": log.adjustflag or "3",
+            "开始日期": log.start_date,
+            "结束日期": log.end_date,
+            "记录数量": log.record_count,
+            "状态": log.status,
+            "说明": log.message or "",
+            "同步时间": log.created_at,
+        }
+        for log in logs
+    ]
+
+
 def get_dashboard_data() -> dict:
     """读取工作台需要的统计信息"""
 
@@ -48,28 +76,9 @@ def get_dashboard_data() -> dict:
         ]
 
         # 最近同步记录
-        sync_logs = list(
-            session.scalars(
-                select(DataSyncLog)
-                .order_by(desc(DataSyncLog.created_at))
-                .limit(10)
-            ).all()
-        )
+        sync_logs = get_sync_logs(limit=10)
 
-        sync_data = [
-            {
-                "股票代码": log.stock_code,
-                "周期": log.period or "d",
-                "复权口径": log.adjustflag or "3",
-                "开始日期": log.start_date,
-                "结束日期": log.end_date,
-                "记录数量": log.record_count,
-                "状态": log.status,
-                "说明": log.message or "",
-                "同步时间": log.created_at,
-            }
-            for log in sync_logs
-        ]
+        sync_data = sync_logs
 
         latest_sync = None
 
@@ -77,9 +86,9 @@ def get_dashboard_data() -> dict:
             last = sync_logs[0]
 
             latest_sync = {
-                "股票代码": last.stock_code,
-                "同步记录数": last.record_count,
-                "同步状态": last.status,
+                "股票代码": last["股票代码"],
+                "同步记录数": last["记录数量"],
+                "同步状态": last["状态"],
             }
 
     return {

@@ -3,6 +3,7 @@
 import streamlit as st
 
 from ui.dashboard import render_dashboard
+from ui.data_sync import render_data_sync
 from ui.stock_management import render_stock_management
 
 
@@ -64,8 +65,7 @@ elif page == "📊 行情中心":
     st.info("下一阶段开发：历史行情查询、K线图、成交量分析。")
 
 elif page == "🔄 数据同步":
-    st.title("🔄 数据同步")
-    st.info("下一阶段开发：选择股票、设置日期范围、手动同步行情。")
+    render_data_sync()
 
 elif page == "🔮 明日预测":
     st.title("🔮 明日预测")

@@ -34,34 +34,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.stdout.reconfigure(encoding="utf-8")
 
 from data.collectors.daily_collector import PERIOD_NAMES, STORED_PERIODS, DailyCollector
+from data.sync_service import ensure_calendar_cover
 from database.repositories.stock_repository import list_stocks
-from database.repositories.trading_calendar_repository import (
-    get_max_calendar_date,
-)
-
-
-def ensure_calendar_cover(collector: DailyCollector, end_date: str) -> str:
-    """保证交易日历覆盖到 end_date，返回说明"""
-
-    max_date = get_max_calendar_date()
-    end_key = str(end_date).strip().replace("-", "")
-
-    if max_date is not None:
-        if max_date.strftime("%Y%m%d") >= end_key:
-            print(f"交易日历已覆盖至 {max_date:%Y-%m-%d}，无需同步")
-            return "已覆盖"
-
-        start = (max_date + timedelta(days=1)).strftime("%Y-%m-%d")
-
-        print(f"交易日历最大 {max_date:%Y-%m-%d}，补齐 {start} ~ {end_date}")
-        collector.sync_calendar(start, end_date)
-
-        return "已补齐"
-    else:
-        print("交易日历表为空，同步 1990-01-01 起完整区间")
-        collector.sync_calendar("1990-01-01", end_date)
-
-        return "已初始化"
 
 
 def main():
@@ -132,7 +106,8 @@ def main():
     collector = DailyCollector()
 
     if args.ensure_calendar:
-        ensure_calendar_cover(collector, args.end)
+        note = ensure_calendar_cover(collector, args.end)
+        print(f"交易日历：{note}")
 
     results = collector.sync_stocks(
         symbols=codes,
