@@ -31,10 +31,10 @@ NOTICE_DATE_COLUMN = "NOTICE_DATE"
 INDICATOR_ALIASES = {
     # ---- 盈利能力（财务摘要） ----
     "roe": ["ROE", "净资产收益率", "净资产收益率(ROE)"],
-    "roe_diluted": ["ROE_DILUTED", "加权净资产收益率"],
+    "roe_diluted": ["ROE_DILUTED", "加权净资产收益率", "净资产收益率_平均", "摊薄净资产收益率"],
     "net_profit_ratio": ["NET_PROFIT_RATIO", "销售净利率", "净利率"],
     "gross_profit_ratio": ["GROSS_PROFIT_RATIO", "销售毛利率", "毛利率"],
-    "eps": ["EPS", "摊薄每股收益", "每股收益"],
+    "eps": ["EPS", "摊薄每股收益", "每股收益", "基本每股收益", "稀释每股收益"],
     "bps": ["BPS", "每股净资产"],
     # ---- 资产负债（资产负债表） ----
     "total_assets": ["TOTAL_ASSETS", "资产总计"],
@@ -58,7 +58,7 @@ INDICATOR_ALIASES = {
         "扣除非经常性损益后的净利润",
         "扣非净利润",
     ],
-    "sell_expense": ["SELL_EXPENSE", "销售费用"],
+    "sell_expense": ["SELL_EXPENSE", "SALE_EXPENSE", "销售费用"],
     "manage_expense": ["MANAGE_EXPENSE", "管理费用"],
     "finance_expense": ["FINANCE_EXPENSE", "财务费用"],
     "research_expense": ["RESEARCH_EXPENSE", "研发费用"],
@@ -78,7 +78,7 @@ INDICATOR_ALIASES = {
     "netcash_operate": ["NETCASH_OPERATE", "经营活动产生的现金流量净额"],
     "netcash_invest": ["NETCASH_INVEST", "投资活动产生的现金流量净额"],
     "netcash_finance": ["NETCASH_FINANCE", "筹资活动产生的现金流量净额"],
-    "netcash_total": ["NETCASH", "现金及现金等价物净增加额"],
+    "netcash_total": ["NETCASH", "NETCASH_TOTAL", "现金及现金等价物净增加额"],
 }
 
 # 三表接口名
@@ -146,8 +146,11 @@ def merge_report_frames(frames: list) -> pd.DataFrame:
 def merge_abstract(merged: pd.DataFrame, abstract: pd.DataFrame) -> pd.DataFrame:
     """把财务摘要（纵向指标）并入宽表
 
-    stock_financial_abstract 返回中文列名，日期列通常是“日期”，
-    需先对齐成 report_date 再做 outer join。
+    stock_financial_abstract 在不同 akshare 版本有两种结构：
+    1. 长表/宽表：含“日期”或 REPORT_DATE 日期列；
+    2. 透视宽表：列名为报告期（YYYYMMDD），行是“指标”名
+       （此时无日期列，需先 melt 再 pivot 对齐 report_date）。
+    两种都先对齐成 report_date 再做 outer join。
     """
 
     if abstract is None or abstract.empty:
@@ -163,26 +166,114 @@ def merge_abstract(merged: pd.DataFrame, abstract: pd.DataFrame) -> pd.DataFrame
         None,
     )
 
-    if date_column is None:
-        return merged
+    if date_column is not None:
+        frame["report_date"] = pd.to_datetime(
+            frame[date_column],
+            errors="coerce",
+        )
+    else:
+        # 透视宽表：列名是报告期（8 位数字日期），行是指标名
+        period_columns = [
+            column for column in frame.columns
+            if _is_period_column(column)
+        ]
+        indicator_column = (
+            "指标" if "指标" in frame.columns else
+            ("indicator" if "indicator" in frame.columns else None)
+        )
 
-    frame["report_date"] = pd.to_datetime(
-        frame[date_column],
-        errors="coerce",
-    )
+        if not period_columns or indicator_column is None:
+            return merged
+
+        melted = frame.melt(
+            id_vars=[indicator_column],
+            value_vars=period_columns,
+            var_name="report_date",
+            value_name="value",
+        )
+        melted["report_date"] = pd.to_datetime(
+            melted["report_date"],
+            format="%Y%m%d",
+            errors="coerce",
+        )
+        melted = melted.dropna(subset=["report_date"])
+
+        if melted.empty:
+            return merged
+
+        frame = (
+            melted
+            .pivot_table(
+                index="report_date",
+                columns=indicator_column,
+                values="value",
+                aggfunc="first",
+            )
+            .reset_index()
+        )
 
     frame = frame.dropna(subset=["report_date"])
 
     if frame.empty:
         return merged
 
-    return pd.merge(
+    merged = pd.merge(
         merged,
         frame,
         on="report_date",
         how="outer",
         suffixes=("", "_dup"),
     )
+
+    return merged.drop_duplicates(subset=["report_date"])
+
+
+def _is_period_column(column: str) -> bool:
+    """判断列名是否为报告期格式（8 位数字日期，如 20260930）"""
+
+    if not isinstance(column, str) or len(column) != 8 or not column.isdigit():
+        return False
+
+    try:
+        pd.to_datetime(column, format="%Y%m%d")
+        return True
+    except (ValueError, TypeError):
+        return False
+
+
+def derive_netcash_total(merged: pd.DataFrame) -> pd.DataFrame:
+    """派生现金及现金等价物净增加额 = 期末 - 期初
+
+    现金流量表无直接的“净增加额”列时，优先用“现金及现金等价物”口径
+    （END_CASH_EQUIVALENTS），该口径缺失时回退到 END_CASH 口径，
+    两口径取并集填充，写入 NETCASH_TOTAL 供抽取。
+    """
+
+    if merged is None or merged.empty or "NETCASH_TOTAL" in merged.columns:
+        return merged
+
+    def _delta(end_col: str, begin_col: str):
+        return pd.to_numeric(merged[end_col], errors="coerce") - pd.to_numeric(
+            merged[begin_col], errors="coerce"
+        )
+
+    deltas = []
+
+    if {"END_CASH_EQUIVALENTS", "BEGIN_CASH_EQUIVALENTS"}.issubset(merged.columns):
+        deltas.append(_delta("END_CASH_EQUIVALENTS", "BEGIN_CASH_EQUIVALENTS"))
+
+    if {"END_CASH", "BEGIN_CASH"}.issubset(merged.columns):
+        deltas.append(_delta("END_CASH", "BEGIN_CASH"))
+
+    if not deltas:
+        return merged
+
+    merged["NETCASH_TOTAL"] = deltas[0]
+
+    for delta in deltas[1:]:
+        merged["NETCASH_TOTAL"] = merged["NETCASH_TOTAL"].fillna(delta)
+
+    return merged
 
 
 def extract_indicators(df: pd.DataFrame) -> pd.DataFrame:
@@ -298,6 +389,7 @@ class AkshareFinancialProvider:
             )
 
         merged = merge_report_frames(frames)
+        merged = derive_netcash_total(merged)
 
         abstract = ak.stock_financial_abstract(symbol=code)
 
