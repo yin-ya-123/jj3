@@ -14,3 +14,4 @@ SQLAlchemy
 
 # A股数据源
 baostock
+plotly
