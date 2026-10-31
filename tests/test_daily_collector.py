@@ -24,6 +24,7 @@ BARS = pd.DataFrame(
         "amount": [1000.0, 2000.0],
         "turn": [0.5, 0.6],
         "pctChg": [1.0, 2.0],
+        "tradestatus": ["1", "0"],
     }
 )
 
@@ -460,3 +461,23 @@ def test_calendar_max_date(tmp_path, monkeypatch):
         )
 
     assert repo.get_max_calendar_date() == date(2026, 10, 30)
+
+
+def test_sync_stock_persists_tradestatus(tmp_path, monkeypatch):
+    """阶段 3.4：日线采集要把 tradestatus 落库 daily_bars"""
+
+    engine = _tmp_session(tmp_path, monkeypatch)
+
+    collector = DailyCollector()
+    collector.provider = FakeProvider(factors=FACTORS, bars=BARS)
+
+    collector.sync_stock("600519", "2026-01-01", "2026-10-30")
+
+    with engine.connect() as conn:
+        rows = conn.execute(
+            select(DailyBar).order_by(DailyBar.trade_date)
+        ).all()
+
+    assert len(rows) == 2
+    assert rows[0].trade_status == "1"
+    assert rows[1].trade_status == "0"

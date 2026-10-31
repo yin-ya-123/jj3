@@ -16,6 +16,26 @@ def _to_float(value):
     return float(value)
 
 
+def _to_trade_status(value):
+    """将 Baostock tradestatus 归一为 '1'/'0' 字符串，缺失/空值为 None
+
+    历史 df（未含 tradestatus 列）落库时 trade_status=None（未知）。
+    """
+    if value is None:
+        return None
+
+    text = str(value).strip()
+
+    if not text:
+        return None
+
+    if text in ("1", "0"):
+        return text
+
+    # 其他取值（如 NaN 字符串）视为未知
+    return None
+
+
 def save_daily_bars(
         df: pd.DataFrame,
         symbol: str,
@@ -51,6 +71,9 @@ def save_daily_bars(
             "amount": _to_float(row["amount"]),
             "turn": _to_float(row["turn"]),
             "pct_chg": _to_float(row["pctChg"]),
+            "trade_status": _to_trade_status(
+                row.get("tradestatus") if hasattr(row, "get") else None
+            ),
         })
 
     if not records:
@@ -76,6 +99,7 @@ def save_daily_bars(
                 "amount": statement.excluded.amount,
                 "turn": statement.excluded.turn,
                 "pct_chg": statement.excluded.pct_chg,
+                "trade_status": statement.excluded.trade_status,
             },
         )
 

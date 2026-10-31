@@ -73,6 +73,10 @@ class DailyBar(Base):
     turn: Mapped[float | None] = mapped_column(Float)
     pct_chg: Mapped[float | None] = mapped_column(Float)
 
+    # 阶段 3.4 新增：交易状态（Baostock tradestatus）
+    # '1'=正常交易 '0'=停牌；历史行迁移前为 NULL（未知）
+    trade_status: Mapped[str | None] = mapped_column(String(2))
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
         server_default=func.current_timestamp(),
